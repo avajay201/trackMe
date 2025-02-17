@@ -1,20 +1,41 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Login from './screens/Login';
+import Register from './screens/Register';
+import Home from './screens/Home';
+
+
+const Stack = createStackNavigator();
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(null);
+
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      const userId = await AsyncStorage.getItem('user_id');
+      if (userId) {
+        setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+      }
+    };
+    checkLoginStatus();
+  }, []);
+
+  if (isLoggedIn === null) {
+    return <ActivityIndicator size="large" color="blue" style={{ flex: 1 }} />;
+  };
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName={isLoggedIn ? 'Home' : 'Login'}>
+        <Stack.Screen name="Login" component={Login} options={{headerShown: false}} />
+        <Stack.Screen name="Register" component={Register} options={{headerShown: false}} />
+        <Stack.Screen name="Home" component={Home} options={{headerShown: false}} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
