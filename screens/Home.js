@@ -1,14 +1,39 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { 
     View, Text, StyleSheet, BackHandler, ToastAndroid, 
     TouchableOpacity, Alert, ActivityIndicator 
 } from "react-native";
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import { updateLocation } from "./ApiActions";
+import { useFocusEffect } from "@react-navigation/native";
 
 
-const Home = () => {
+const LOCATION_TRACKING = "background-location-task";
+TaskManager.defineTask(LOCATION_TRACKING, async ({ data, error }) => {
+    if (error) {
+        console.log("Background location error:", error);
+        return;
+    }
+    if (data) {
+        const { locations } = data;
+        if (locations.length > 0) {
+            const location = locations[0];
+            console.log("Background Location:", location);
+
+            const user_id = await AsyncStorage.getItem('user_id');
+            await updateLocation({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                timestamp: location.timestamp,
+                user_id: user_id,
+            });
+        }
+    }
+});
+
+const Home = ({ navigation }) => {
     const [exitApp, setExitApp] = useState(false);
     const [isTracking, setIsTracking] = useState(false);
     const [location, setLocation] = useState(null);
@@ -17,36 +42,39 @@ const Home = () => {
     const [trackingLoading, setTrackingLoading] = useState(false);
     const [locationSubscription, setLocationSubscription] = useState(null);
 
-    useEffect(() => {
-        const backAction = () => {
-            if (exitApp) {
-                BackHandler.exitApp();
-                return true;
-            } else {
-                setExitApp(true);
-                ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
-                setTimeout(() => setExitApp(false), 2000);
-                return true;
-            }
-        };
+    useFocusEffect(
+        useCallback(() => {
+            const backAction = () => {
+                if (exitApp) {
+                    BackHandler.exitApp();
+                    return true;
+                } else {
+                    setExitApp(true);
+                    ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
+                    setTimeout(() => setExitApp(false), 2000);
+                    return true;
+                }
+            };
 
-        const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
-        return () => backHandler.remove();
-    }, [exitApp]);
+            const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
+
+            return () => backHandler.remove();
+        }, [exitApp])
+    );
 
     const fetchTrackingStatus = async () => {
         const tracking = await AsyncStorage.getItem('tracking');
         if (tracking === 'true') {
             setIsTracking(true);
-        }
+            await trackingProcessExecution();
+        };
     };
 
     useEffect(() => {
         fetchTrackingStatus();
     }, []);
 
-    const startLocationTracking = async () => {
-        setTrackingLoading(true);
+    const trackingProcessExecution = async()=>{
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
             Alert.alert('Error', 'Permission to access location was denied.');
@@ -55,9 +83,31 @@ const Home = () => {
             return;
         };
 
+        let { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        if (bgStatus !== 'granted') {
+            Alert.alert('Error', 'Permission to access background location was denied.');
+            return;
+        };
+
+        await Location.startLocationUpdatesAsync(LOCATION_TRACKING, {
+            accuracy: Location.Accuracy.BestForNavigation,
+            timeInterval: 5000,
+            distanceInterval: 5,
+            foregroundService: {
+                notificationTitle: "Location Tracking",
+                notificationBody: "Your location is being tracked in the background.",
+                notificationColor: "#007bff",
+            }
+        });
+
+        const isTaskDefined = await TaskManager.isTaskRegisteredAsync(LOCATION_TRACKING);
+        if (!isTaskDefined) {
+            console.log("Registering Task...");
+        };
+
         const subscription = await Location.watchPositionAsync(
             {
-                accuracy: Location.Accuracy.High,
+                accuracy: Location.Accuracy.BestForNavigation,
                 timeInterval: 5000,
                 distanceInterval: 5,
             },
@@ -73,9 +123,6 @@ const Home = () => {
                 });
                 setLoading(false);
                 if (result === 200) {
-                    if (!lastResponse) {
-                        ToastAndroid.show('Tracking started.', ToastAndroid.SHORT);
-                    };
                     setLastResponse('Success ✅');
                 } else {
                     setLastResponse('Failed ❌');
@@ -84,6 +131,11 @@ const Home = () => {
         );
 
         setLocationSubscription(subscription);
+    };
+
+    const startLocationTracking = async () => {
+        setTrackingLoading(true);
+        await trackingProcessExecution();
         setIsTracking(true);
         await AsyncStorage.setItem('tracking', 'true');
         setTrackingLoading(false);
@@ -106,8 +158,9 @@ const Home = () => {
                     if (locationSubscription) {
                         locationSubscription.remove();
                         setLocationSubscription(null);
-                    }
+                    };
 
+                    await Location.stopLocationUpdatesAsync(LOCATION_TRACKING);
                     ToastAndroid.show("Tracking Stopped", ToastAndroid.SHORT);
                     setTrackingLoading(false);
                 }}
@@ -148,6 +201,16 @@ const Home = () => {
                     <Text style={styles.responseText}>{lastResponse}</Text>
                 </View>
             )}
+
+            {!location && !lastResponse && isTracking &&
+                <View>
+                    <ActivityIndicator size="small" color="#007bff" />
+                </View>    
+            }
+
+            <TouchableOpacity style={styles.locationHistory} onPress={()=> navigation.navigate('LocationHistory')}>
+                <Text style={styles.locationHistoryText}>Location History</Text>
+            </TouchableOpacity>
         </View>
     );
 };
@@ -217,6 +280,19 @@ const styles = StyleSheet.create({
     },
     responseText: {
         fontSize: 16,
+        fontWeight: "bold",
+    },
+    locationHistory: {
+        position: 'absolute',
+        bottom: '10%',
+        backgroundColor: "#007bff",
+        paddingVertical: 12,
+        paddingHorizontal: 25,
+        borderRadius: 10,
+    },
+    locationHistoryText: {
+        color: "#fff",
+        fontSize: 18,
         fontWeight: "bold",
     },
 });

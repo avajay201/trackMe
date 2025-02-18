@@ -109,6 +109,20 @@ def update_location():
 
         conn = sqlite3.connect('users.db')
         c = conn.cursor()
+
+        c.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
+        user_exists = c.fetchone()
+
+        if not user_exists:
+            return jsonify({"error": "User does not exist"}), 404
+
+        c.execute("SELECT 1 FROM locations WHERE user_id = ? AND latitude = ? AND longitude = ?", 
+                  (user_id, latitude, longitude))
+        existing_location = c.fetchone()
+
+        if existing_location:
+            return jsonify({"message": "Location already exists, not added."}), 200
+
         c.execute("INSERT INTO locations (user_id, latitude, longitude, timestamp) VALUES (?, ?, ?, ?)",
                   (user_id, latitude, longitude, formatted_time))
         conn.commit()
@@ -130,6 +144,13 @@ def get_location():
 
         conn = sqlite3.connect('users.db')
         c = conn.cursor()
+
+        c.execute("SELECT 1 FROM users WHERE id = ?", (user_id,))
+        user_exists = c.fetchone()
+
+        if not user_exists:
+            return jsonify({"error": "User does not exist"}), 404
+
         c.execute(f"SELECT * FROM locations WHERE user_id={user_id} ORDER BY timestamp DESC LIMIT 10")
         location_data = c.fetchall()
         conn.close()
